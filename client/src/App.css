@@ -1,0 +1,19 @@
+.chat-container {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+.message {
+  transition: transform 0.2s;
+}
+
+.message:hover {
+  transform: scale(1.02);
+}
+
+.reaction {
+  transition: opacity 0.2s;
+}
+
+.reaction:hover {
+  opacity: 1 !important;
+}

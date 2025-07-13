@@ -1,12 +1,9 @@
-// socket.js - Socket.io client setup
+import { io } from 'socket.io-client'
+import { useState, useEffect } from 'react';
+console.log('io imported:', io);
+console.log('REACT_APP_SOCKET_URL:', process.env.REACT_APP_SOCKET_URL);
 
-import { io } from 'socket.io-client';
-import { useEffect, useState } from 'react';
-
-// Socket.io connection URL
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
-
-// Create socket instance
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000';
 export const socket = io(SOCKET_URL, {
   autoConnect: false,
   reconnection: true,
@@ -23,10 +20,10 @@ export const useSocket = () => {
   const [typingUsers, setTypingUsers] = useState([]);
 
   // Connect to socket server
-  const connect = (username) => {
+  const connect = (username, roomId) => {
     socket.connect();
     if (username) {
-      socket.emit('user_join', username);
+      socket.emit('user_join', { username, roomId });
     }
   };
 
@@ -36,23 +33,45 @@ export const useSocket = () => {
   };
 
   // Send a message
-  const sendMessage = (message) => {
-    socket.emit('send_message', { message });
+  const sendMessage = (roomId, message, file) => {
+    socket.emit('send_message', { roomId, message, file }, ({ status, messageId }) => {
+      if (status === 'delivered') {
+        console.log('Message delivered:', messageId);
+      }
+    });
   };
 
   // Send a private message
-  const sendPrivateMessage = (to, message) => {
-    socket.emit('private_message', { to, message });
+  const sendPrivateMessage = (to, message, file) => {
+    socket.emit('private_message', { to, message, file }, ({ status, messageId }) => {
+      if (status === 'delivered') {
+        console.log('Private message delivered:', messageId);
+      }
+    });
   };
 
   // Set typing status
-  const setTyping = (isTyping) => {
-    socket.emit('typing', isTyping);
+  const setTyping = (isTyping, roomId, to) => {
+    socket.emit('typing', { isTyping, roomId, to });
+  };
+
+  // Load more messages
+  const loadMoreMessages = (roomId, page, limit = 20) => {
+    socket.emit('load_more', { roomId, page, limit });
+  };
+
+  // Send read receipt
+  const sendReadReceipt = (messageId, roomId, to) => {
+    socket.emit('read', { messageId, roomId, to });
+  };
+
+  // Send reaction
+  const sendReaction = (messageId, reaction, roomId, to) => {
+    socket.emit('react', { messageId, reaction, roomId, to });
   };
 
   // Socket event listeners
   useEffect(() => {
-    // Connection events
     const onConnect = () => {
       setIsConnected(true);
     };
@@ -61,24 +80,27 @@ export const useSocket = () => {
       setIsConnected(false);
     };
 
-    // Message events
     const onReceiveMessage = (message) => {
       setLastMessage(message);
       setMessages((prev) => [...prev, message]);
+      if (message.sender !== socket.id && Notification.permission === 'granted') {
+        new Notification(`${message.sender}: ${message.message || 'Sent an image'}`);
+      }
     };
 
     const onPrivateMessage = (message) => {
       setLastMessage(message);
       setMessages((prev) => [...prev, message]);
+      if (message.sender !== socket.id && Notification.permission === 'granted') {
+        new Notification(`${message.sender}: ${message.message || 'Sent an image'}`);
+      }
     };
 
-    // User events
-    const onUserList = (userList) => {
+    const onUserList = ({ roomId, users: userList }) => {
       setUsers(userList);
     };
 
     const onUserJoined = (user) => {
-      // You could add a system message here
       setMessages((prev) => [
         ...prev,
         {
@@ -91,7 +113,6 @@ export const useSocket = () => {
     };
 
     const onUserLeft = (user) => {
-      // You could add a system message here
       setMessages((prev) => [
         ...prev,
         {
@@ -103,12 +124,40 @@ export const useSocket = () => {
       ]);
     };
 
-    // Typing events
     const onTypingUsers = (users) => {
       setTypingUsers(users);
     };
 
-    // Register event listeners
+    const onMessages = (messages) => {
+      setMessages((prev) => [...messages, ...prev]);
+    };
+
+    const onReadReceipt = ({ messageId }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId ? { ...msg, read: true } : msg
+        )
+      );
+    };
+
+    const onReaction = ({ messageId, username, reaction }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? { ...msg, reactions: { ...msg.reactions, [username]: reaction } }
+            : msg
+        )
+      );
+    };
+
+    const onUnreadCount = ({ roomId, count }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          !msg.isPrivate && msg.roomId === roomId ? { ...msg, unreadCount: count } : msg
+        )
+      );
+    };
+
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('receive_message', onReceiveMessage);
@@ -117,8 +166,11 @@ export const useSocket = () => {
     socket.on('user_joined', onUserJoined);
     socket.on('user_left', onUserLeft);
     socket.on('typing_users', onTypingUsers);
+    socket.on('messages', onMessages);
+    socket.on('read_receipt', onReadReceipt);
+    socket.on('reaction', onReaction);
+    socket.on('unread_count', onUnreadCount);
 
-    // Clean up event listeners
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
@@ -128,6 +180,10 @@ export const useSocket = () => {
       socket.off('user_joined', onUserJoined);
       socket.off('user_left', onUserLeft);
       socket.off('typing_users', onTypingUsers);
+      socket.off('messages', onMessages);
+      socket.off('read_receipt', onReadReceipt);
+      socket.off('reaction', onReaction);
+      socket.off('unread_count', onUnreadCount);
     };
   }, []);
 
@@ -143,7 +199,10 @@ export const useSocket = () => {
     sendMessage,
     sendPrivateMessage,
     setTyping,
+    loadMoreMessages,
+    sendReadReceipt,
+    sendReaction,
   };
 };
 
-export default socket; 
+export default socket;
